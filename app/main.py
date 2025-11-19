@@ -1,91 +1,136 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 
 from .schemas import TablePrediction, HealthResponse
 from .model import get_model
+from .config import settings  # חשוב: לוודא שיש settings
 
-# Custom API with beautiful documentation
+from PIL import Image, UnidentifiedImageError
+import io
+import uuid
+import time
+
+# ===== הגדרות כלליות =====
+
+MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+MAX_IMAGE_DIM = 3000  # פיקסלים (צד ארוך מקסימלי)
+
+API_KEY_HEADER_NAME = "x-api-key"
+
+
+def raise_http_error(status_code: int, error_code: str, message: str) -> None:
+    """
+    Helper לזריקת HTTPException בפורמט אחיד.
+    """
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "error_code": error_code,
+            "message": message,
+        },
+    )
+
+
+def validate_image_bytes(image_bytes: bytes) -> None:
+    """
+    בדיקת קלט בסיסית:
+    - לא ריק
+    - לא גדול מדי
+    - אכן תמונה תקינה
+    - לא רזולוציה קיצונית
+    """
+    if not image_bytes:
+        raise_http_error(400, "EMPTY_FILE", "Empty file received. Please upload a valid image.")
+
+    if len(image_bytes) > MAX_FILE_SIZE_BYTES:
+        raise_http_error(
+            400,
+            "FILE_TOO_LARGE",
+            f"File too large. Maximum allowed size is {MAX_FILE_SIZE_BYTES // (1024 * 1024)}MB.",
+        )
+
+    # בדיקת תקינות תמונה
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img.verify()  # בדיקה בסיסית שמדובר בקובץ תמונה
+    except UnidentifiedImageError:
+        raise_http_error(400, "INVALID_IMAGE", "Uploaded file is not a valid image.")
+    except Exception:
+        raise_http_error(400, "INVALID_IMAGE", "Could not process the uploaded image.")
+
+    # צריך לפתוח שוב אחרי verify
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+    w, h = img.size
+    if w < 100 or h < 100:
+        raise_http_error(
+            400,
+            "IMAGE_TOO_SMALL",
+            "Image is too small. Please upload a clearer/larger image.",
+        )
+
+    if max(w, h) > MAX_IMAGE_DIM:
+        # לא זורקים שגיאה – אבל אפשר יהיה בעתיד לעשות resize כאן אם תרצה
+        # כרגע רק לוגיקה רכה (אפשר להקשיח אם תבחר)
+        pass
+
+
+# ===== אבטחה ברמת API – API Key =====
+
+def verify_api_key(x_api_key: str | None = Header(default=None, alias=API_KEY_HEADER_NAME)):
+    """
+    בדיקת API key פשוטה:
+    - אם מוגדר settings.API_KEY → דורשים אותו
+    - אם לא מוגדר → לא בודקים (מצב dev)
+    """
+    expected = getattr(settings, "API_KEY", None)
+
+    if expected:
+        if x_api_key is None:
+            raise_http_error(401, "MISSING_API_KEY", f"Missing {API_KEY_HEADER_NAME} header.")
+        if x_api_key != expected:
+            raise_http_error(401, "INVALID_API_KEY", "Invalid API key.")
+    # אם אין הגדרה – לא עושים כלום (dev mode)
+    return x_api_key
+
+
+# ===== אפליקציית FastAPI =====
+
 app = FastAPI(
     title="Financial Table Type Detector API",
     version="1.0.0",
     description="""
-## 🔍 AI-Powered Financial Statement Analysis
-
-**Instantly classify table types in financial documents with cutting-edge computer vision.**
-
-### 🎯 What We Detect
-- **`balance`** → Balance Sheet (Statement of Financial Position)
-- **`activity`** → Income Statement / Cash Flow / Activity Report
-
-### ⚡ Performance
-- **Response Time:** < 2 seconds
-- **Accuracy:** 95%+ on real financial documents
-- **Supported Formats:** PNG, JPEG, JPG
-
-### 🚀 How It Works
-1. Upload an image of a financial statement page
-2. Our YOLO-based model analyzes the document structure
-3. Get instant classification with confidence score
-
-### 💡 Use Cases
-- Automated document processing pipelines
-- Financial data extraction workflows
-- Compliance and audit automation
-- Document management systems
-- RPA (Robotic Process Automation) integration
-
-### 📊 API Endpoints
-- **POST `/predict`** - Upload image and get classification
-- **GET `/health`** - Service health check
-- **GET `/`** - Interactive demo interface
-
----
-
-**Built with:** FastAPI · YOLO · PyTorch · Google Cloud Run
+    ... התיאור הארוך שלך כאן ...
     """,
-    docs_url=None,  # Custom docs
-    redoc_url=None,  # Custom redoc
+    docs_url=None,
+    redoc_url=None,
     openapi_tags=[
-        {
-            "name": "Prediction",
-            "description": "🤖 Core ML inference endpoints for table type classification",
-        },
-        {
-            "name": "Health",
-            "description": "💚 Service monitoring and status endpoints",
-        },
-        {
-            "name": "Demo",
-            "description": "🎨 Interactive web interface for testing",
-        },
+        {"name": "Prediction", "description": "🤖 Core ML inference endpoints"},
+        {"name": "Health", "description": "💚 Service monitoring and status endpoints"},
+        {"name": "Demo", "description": "🎨 Interactive web interface for testing"},
     ],
 )
 
-# CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # אפשר להקשיח בהמשך לרשימת דומיינים
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# Load model on startup
 @app.on_event("startup")
 def load_model_on_startup():
-    """Initialize ML model at service startup"""
     try:
         _ = get_model()
         print("✅ Model loaded successfully at startup")
     except Exception as e:
-        # חשוב ללוגים ב-Cloud Run
         print(f"❌ Failed to load model on startup: {e}")
 
 
-# Custom Swagger UI with dark theme
 @app.get("/docs", include_in_schema=False)
 async def custom_swagger_ui_html():
     return get_swagger_ui_html(
@@ -100,7 +145,7 @@ async def custom_swagger_ui_html():
     )
 
 
-# Beautiful landing page (unchanged)
+# simple landing page (unchanged)
 @app.get(
     "/",
     response_class=HTMLResponse,
@@ -381,12 +426,12 @@ async def demo_interface():
                 <div class="feature">
                     <div class="feature-icon">⚡</div>
                     <div class="feature-title">Fast</div>
-                    <div class="feature-text">Results in under 2 seconds</div>
+                    <div class="feature-text">Results in under 5 seconds</div>
                 </div>
                 <div class="feature">
                     <div class="feature-icon">🎯</div>
                     <div class="feature-title">Accurate</div>
-                    <div class="feature-text">95%+ accuracy rate</div>
+                    <div class="feature-text">90%+ accuracy rate</div>
                 </div>
                 <div class="feature">
                     <div class="feature-icon">🔒</div>
@@ -509,7 +554,6 @@ async def demo_interface():
     """
 
 
-# Health check endpoint
 @app.get(
     "/health",
     response_model=HealthResponse,
@@ -518,20 +562,13 @@ async def demo_interface():
     description="Verify that the service is running and the model is loaded",
 )
 def health_check():
-    """
-    Returns the current health status of the service.
-    """
     try:
         _ = get_model()
         return HealthResponse(status="ok", message="service and model are up and running")
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Health check failed: {e}",
-        )
+        raise_http_error(500, "HEALTH_CHECK_FAILED", f"Health check failed: {e}")
 
 
-# Main prediction endpoint
 @app.post(
     "/predict",
     response_model=TablePrediction,
@@ -540,35 +577,52 @@ def health_check():
     description="Upload a financial statement image and get instant classification",
 )
 async def predict_table_type(
-    file: UploadFile = File(..., description="Financial statement image (PNG/JPEG)")
+    file: UploadFile = File(..., description="Financial statement image (PNG/JPEG)"),
+    _api_key: str | None = Depends(verify_api_key),  # אבטחה
 ):
     """
     Analyze a financial statement image and classify the table type.
     """
+    # בדיקת סוג קובץ
     if file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
-        raise HTTPException(
-            status_code=400,
-            detail="Unsupported file type. Please upload PNG or JPEG image.",
+        raise_http_error(
+            400,
+            "UNSUPPORTED_MEDIA_TYPE",
+            "Unsupported file type. Please upload PNG or JPEG image.",
         )
 
-    image_bytes = await file.read()
-    if not image_bytes:
-        raise HTTPException(
-            status_code=400,
-            detail="Empty file received. Please upload a valid image.",
-        )
+    # קריאת קובץ
+    try:
+        image_bytes = await file.read()
+    except Exception:
+        raise_http_error(400, "FILE_READ_ERROR", "Could not read uploaded file.")
+
+    # ולידציה בסיסית לתמונה
+    validate_image_bytes(image_bytes)
+
+    # מדידת זמן לריצה (לא חובה, אבל נחמד ללוגים)
+    request_id = str(uuid.uuid4())
+    t0 = time.time()
 
     try:
         model = get_model()
         label, conf = model.predict(image_bytes)
-
-        return TablePrediction(
-            predicted_label=label,
-            confidence=conf,
-            boxes=None,
-        )
+    except HTTPException:
+        # אם מישהו בפנים זרק HTTPException – נעביר הלאה כמו שהוא
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction failed: {str(e)}",
-        )
+        # שגיאה לא צפויה
+        print(f"[ERROR] request_id={request_id} prediction failed: {e}")
+        raise_http_error(500, "PREDICTION_FAILED", "Prediction failed due to internal error.")
+
+    latency_ms = int((time.time() - t0) * 1000)
+    print(
+        f"[PREDICTION] request_id={request_id} label={label} conf={conf:.4f} "
+        f"latency_ms={latency_ms}"
+    )
+
+    return TablePrediction(
+        predicted_label=label,
+        confidence=conf,
+        boxes=None,
+    )
