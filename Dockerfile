@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Download model from GCS into the image
-# IMPORTANT: this works great in Cloud Build (has credentials), לא בהכרח לוקאלית
+# IMPORTANT: this works great in Cloud Build (has credentials), not necessarily locally
 RUN mkdir -p model && \
     gsutil cp gs://table-detector-model-eu/table_type_identification.pt model/table_type_identification.pt
 

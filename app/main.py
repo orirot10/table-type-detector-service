@@ -5,24 +5,24 @@ from fastapi.openapi.docs import get_swagger_ui_html
 
 from .schemas import TablePrediction, HealthResponse
 from .model import get_model
-from .config import settings  # חשוב: לוודא שיש settings
+from .config import settings  # Important: ensure settings exists
 
 from PIL import Image, UnidentifiedImageError
 import io
 import uuid
 import time
 
-# ===== הגדרות כלליות =====
+# ===== General Settings =====
 
 MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
-MAX_IMAGE_DIM = 3000  # פיקסלים (צד ארוך מקסימלי)
+MAX_IMAGE_DIM = 3000  # pixels (maximum long side)
 
 API_KEY_HEADER_NAME = "x-api-key"
 
 
 def raise_http_error(status_code: int, error_code: str, message: str) -> None:
     """
-    Helper לזריקת HTTPException בפורמט אחיד.
+    Helper for throwing HTTPException in a uniform format.
     """
     raise HTTPException(
         status_code=status_code,
@@ -35,11 +35,11 @@ def raise_http_error(status_code: int, error_code: str, message: str) -> None:
 
 def validate_image_bytes(image_bytes: bytes) -> None:
     """
-    בדיקת קלט בסיסית:
-    - לא ריק
-    - לא גדול מדי
-    - אכן תמונה תקינה
-    - לא רזולוציה קיצונית
+    Basic input validation:
+    - Not empty
+    - Not too large
+    - Actually a valid image
+    - Not extreme resolution
     """
     if not image_bytes:
         raise_http_error(400, "EMPTY_FILE", "Empty file received. Please upload a valid image.")
@@ -51,16 +51,16 @@ def validate_image_bytes(image_bytes: bytes) -> None:
             f"File too large. Maximum allowed size is {MAX_FILE_SIZE_BYTES // (1024 * 1024)}MB.",
         )
 
-    # בדיקת תקינות תמונה
+    # Image validity check
     try:
         img = Image.open(io.BytesIO(image_bytes))
-        img.verify()  # בדיקה בסיסית שמדובר בקובץ תמונה
+        img.verify()  # Basic check that this is an image file
     except UnidentifiedImageError:
         raise_http_error(400, "INVALID_IMAGE", "Uploaded file is not a valid image.")
     except Exception:
         raise_http_error(400, "INVALID_IMAGE", "Could not process the uploaded image.")
 
-    # צריך לפתוח שוב אחרי verify
+    # Need to reopen after verify
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
     w, h = img.size
@@ -72,18 +72,18 @@ def validate_image_bytes(image_bytes: bytes) -> None:
         )
 
     if max(w, h) > MAX_IMAGE_DIM:
-        # לא זורקים שגיאה – אבל אפשר יהיה בעתיד לעשות resize כאן אם תרצה
-        # כרגע רק לוגיקה רכה (אפשר להקשיח אם תבחר)
+        # Not throwing error - but could do resize here in the future if desired
+        # Currently just soft logic (can be hardened if chosen)
         pass
 
 
-# ===== אבטחה ברמת API – API Key =====
+# ===== API Level Security - API Key =====
 
 def verify_api_key(x_api_key: str | None = Header(default=None, alias=API_KEY_HEADER_NAME)):
     """
-    בדיקת API key פשוטה:
-    - אם מוגדר settings.API_KEY → דורשים אותו
-    - אם לא מוגדר → לא בודקים (מצב dev)
+    Simple API key validation:
+    - If settings.API_KEY is set → require it
+    - If not set → don't check (dev mode)
     """
     expected = getattr(settings, "API_KEY", None)
 
@@ -92,17 +92,18 @@ def verify_api_key(x_api_key: str | None = Header(default=None, alias=API_KEY_HE
             raise_http_error(401, "MISSING_API_KEY", f"Missing {API_KEY_HEADER_NAME} header.")
         if x_api_key != expected:
             raise_http_error(401, "INVALID_API_KEY", "Invalid API key.")
-    # אם אין הגדרה – לא עושים כלום (dev mode)
+    # If no setting - do nothing (dev mode)
     return x_api_key
 
 
-# ===== אפליקציית FastAPI =====
+# ===== FastAPI Application =====
 
 app = FastAPI(
     title="Financial Table Type Detector API",
     version="1.0.0",
     description="""
-    ... התיאור הארוך שלך כאן ...
+    A microservice that receives an image of a table and returns the detected table type.
+    Supports balance tables (financial statements) and activity tables (cash flow, transactions).
     """,
     docs_url=None,
     redoc_url=None,
@@ -115,7 +116,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # אפשר להקשיח בהמשך לרשימת דומיינים
+    allow_origins=["*"],  # Can be hardened later to specific domains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -578,12 +579,12 @@ def health_check():
 )
 async def predict_table_type(
     file: UploadFile = File(..., description="Financial statement image (PNG/JPEG)"),
-    _api_key: str | None = Depends(verify_api_key),  # אבטחה
+    _api_key: str | None = Depends(verify_api_key),  # Security
 ):
     """
     Analyze a financial statement image and classify the table type.
     """
-    # בדיקת סוג קובץ
+    # File type validation
     if file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
         raise_http_error(
             400,
@@ -591,16 +592,16 @@ async def predict_table_type(
             "Unsupported file type. Please upload PNG or JPEG image.",
         )
 
-    # קריאת קובץ
+    # File reading
     try:
         image_bytes = await file.read()
     except Exception:
         raise_http_error(400, "FILE_READ_ERROR", "Could not read uploaded file.")
 
-    # ולידציה בסיסית לתמונה
+    # Basic image validation
     validate_image_bytes(image_bytes)
 
-    # מדידת זמן לריצה (לא חובה, אבל נחמד ללוגים)
+    # Runtime measurement (not required, but nice for logs)
     request_id = str(uuid.uuid4())
     t0 = time.time()
 
@@ -608,10 +609,10 @@ async def predict_table_type(
         model = get_model()
         label, conf = model.predict(image_bytes)
     except HTTPException:
-        # אם מישהו בפנים זרק HTTPException – נעביר הלאה כמו שהוא
+        # If someone inside threw HTTPException - pass it along as is
         raise
     except Exception as e:
-        # שגיאה לא צפויה
+        # Unexpected error
         print(f"[ERROR] request_id={request_id} prediction failed: {e}")
         raise_http_error(500, "PREDICTION_FAILED", "Prediction failed due to internal error.")
 

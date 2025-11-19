@@ -5,7 +5,7 @@ from typing import Optional, List, Any
 class TablePrediction(BaseModel):
     predicted_label: str
     confidence: float
-    boxes: Optional[List[Any]] = None  # אפשר לשנות בהמשך אם תחזיר בוקסים
+    boxes: Optional[List[Any]] = None  # Can be changed later if returning boxes
 
 
 class HealthResponse(BaseModel):
