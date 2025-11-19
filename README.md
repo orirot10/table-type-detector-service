@@ -131,7 +131,7 @@ table-type-detector-service/
 ├── models/               # ML models or rule sets
 │   └── table_classifier.pkl
 ├── tests/                # Unit and integration tests
-│   └── test_detector.py
+│   └── test_detector.py # will be added
 ├── requirements.txt      # Python dependencies
 ├── Dockerfile            # Docker configuration
 ├── docker-compose.yml    # Optional: For multi-service setups
@@ -165,10 +165,6 @@ Ensure 100% coverage for detection accuracy.
 
 Feedback and pull requests are welcome! For major changes, please open an issue first.
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. (If no LICENSE file exists, feel free to add one.)
-
 ## Acknowledgments
 
 - Developed as part of an AI Engineer position task.
@@ -177,3 +173,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 For questions or issues, open a GitHub issue or contact [orirot10](https://github.com/orirot10).
+
