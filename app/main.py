@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.openapi.docs import get_swagger_ui_html
+
 from .schemas import TablePrediction, HealthResponse
 from .model import get_model
 
@@ -25,7 +26,7 @@ app = FastAPI(
 
 ### 🚀 How It Works
 1. Upload an image of a financial statement page
-2. Our YOLOv11 model analyzes the document structure
+2. Our YOLO-based model analyzes the document structure
 3. Get instant classification with confidence score
 
 ### 💡 Use Cases
@@ -42,24 +43,24 @@ app = FastAPI(
 
 ---
 
-**Built with:** FastAPI · YOLOv11 · PyTorch · Google Cloud Run
+**Built with:** FastAPI · YOLO · PyTorch · Google Cloud Run
     """,
     docs_url=None,  # Custom docs
     redoc_url=None,  # Custom redoc
     openapi_tags=[
         {
             "name": "Prediction",
-            "description": "🤖 Core ML inference endpoints for table type classification"
+            "description": "🤖 Core ML inference endpoints for table type classification",
         },
         {
             "name": "Health",
-            "description": "💚 Service monitoring and status endpoints"
+            "description": "💚 Service monitoring and status endpoints",
         },
         {
             "name": "Demo",
-            "description": "🎨 Interactive web interface for testing"
-        }
-    ]
+            "description": "🎨 Interactive web interface for testing",
+        },
+    ],
 )
 
 # CORS configuration
@@ -71,12 +72,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Load model on startup
 @app.on_event("startup")
 def load_model_on_startup():
     """Initialize ML model at service startup"""
-    _ = get_model()
-    print("✅ Model loaded successfully")
+    try:
+        _ = get_model()
+        print("✅ Model loaded successfully at startup")
+    except Exception as e:
+        # חשוב ללוגים ב-Cloud Run
+        print(f"❌ Failed to load model on startup: {e}")
 
 
 # Custom Swagger UI with dark theme
@@ -90,14 +96,18 @@ async def custom_swagger_ui_html():
             "defaultModelsExpandDepth": -1,
             "syntaxHighlight.theme": "monokai",
             "tryItOutEnabled": True,
-        }
+        },
     )
 
 
-# Beautiful landing page
-@app.get("/", response_class=HTMLResponse, tags=["Demo"], 
-         summary="Interactive Demo Interface",
-         description="Web-based UI for testing the table classification API")
+# Beautiful landing page (unchanged)
+@app.get(
+    "/",
+    response_class=HTMLResponse,
+    tags=["Demo"],
+    summary="Interactive Demo Interface",
+    description="Web-based UI for testing the table classification API",
+)
 async def demo_interface():
     return """
 <!DOCTYPE html>
@@ -406,10 +416,8 @@ async def demo_interface():
         
         let selectedFile = null;
         
-        // Click to upload
         uploadArea.addEventListener('click', () => fileInput.click());
         
-        // Drag and drop
         uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
             uploadArea.classList.add('dragover');
@@ -482,7 +490,14 @@ async def demo_interface():
             const label = data.predicted_label;
             const confidence = (data.confidence * 100).toFixed(1);
             
-            resultLabel.textContent = label === 'balance' ? '📊 Balance Sheet' : '💰 Activity Statement';
+            if (label === 'balance') {
+                resultLabel.textContent = '📊 Balance Sheet';
+            } else if (label === 'activity') {
+                resultLabel.textContent = '💰 Activity Statement';
+            } else {
+                resultLabel.textContent = '❓ Unknown';
+            }
+            
             confidenceText.textContent = confidence + '%';
             confidenceFill.style.width = confidence + '%';
             
@@ -495,72 +510,58 @@ async def demo_interface():
 
 
 # Health check endpoint
-@app.get("/health", response_model=HealthResponse, tags=["Health"],
-         summary="Health Check",
-         description="Verify that the service is running and the model is loaded")
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    tags=["Health"],
+    summary="Health Check",
+    description="Verify that the service is running and the model is loaded",
+)
 def health_check():
     """
     Returns the current health status of the service.
-    
-    **Response:**
-    - `status`: "ok" if service is healthy
-    - `message`: Human-readable status message
     """
-    return HealthResponse(status="ok", message="service is up and running")
+    try:
+        _ = get_model()
+        return HealthResponse(status="ok", message="service and model are up and running")
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Health check failed: {e}",
+        )
 
 
 # Main prediction endpoint
-@app.post("/predict", response_model=TablePrediction, tags=["Prediction"],
-          summary="Classify Table Type",
-          description="Upload a financial statement image and get instant classification")
+@app.post(
+    "/predict",
+    response_model=TablePrediction,
+    tags=["Prediction"],
+    summary="Classify Table Type",
+    description="Upload a financial statement image and get instant classification",
+)
 async def predict_table_type(
     file: UploadFile = File(..., description="Financial statement image (PNG/JPEG)")
 ):
     """
     Analyze a financial statement image and classify the table type.
-    
-    **Input:**
-    - Image file (PNG, JPEG, JPG format)
-    - Must contain a visible financial table
-    
-    **Output:**
-    - `predicted_label`: "balance" or "activity"
-    - `confidence`: Float between 0.0 and 1.0
-    - `boxes`: Reserved for future bounding box coordinates
-    
-    **Example Response:**
-    ```json
-    {
-      "predicted_label": "balance",
-      "confidence": 0.94,
-      "boxes": null
-    }
-    ```
-    
-    **Error Codes:**
-    - `400`: Invalid file type or empty file
-    - `500`: Model prediction failed
     """
-    # Validate file type
     if file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
         raise HTTPException(
             status_code=400,
-            detail="Unsupported file type. Please upload PNG or JPEG image."
+            detail="Unsupported file type. Please upload PNG or JPEG image.",
         )
-    
-    # Read file content
+
     image_bytes = await file.read()
     if not image_bytes:
         raise HTTPException(
             status_code=400,
-            detail="Empty file received. Please upload a valid image."
+            detail="Empty file received. Please upload a valid image.",
         )
-    
-    # Run inference
+
     try:
         model = get_model()
         label, conf = model.predict(image_bytes)
-        
+
         return TablePrediction(
             predicted_label=label,
             confidence=conf,
@@ -569,5 +570,5 @@ async def predict_table_type(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Prediction failed: {str(e)}"
+            detail=f"Prediction failed: {str(e)}",
         )
