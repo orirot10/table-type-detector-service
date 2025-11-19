@@ -4,7 +4,7 @@
 
 ## Project Description
 
-A microservice that receives an image of a table (e.g., PDF → image, scan, screenshot, etc.) and returns the detected table type:
+A microservice that receives an image of a table (e.g., image, scan, screenshot, etc.) and returns the detected table type:
 
 Possible table types:
 - `balance` – Balance tables (financial statements, assets/liabilities, etc.)
@@ -172,7 +172,7 @@ The service will be available at a URL like:
 - No use of Default Compute Service Account
 - No secrets in code or image
 
-## Future Extensions (Already Prepared in Code)
+## Future Extensions 
 
 - Direct PDF support (via pdf2image)
 - Returning multiple tables in one image
@@ -198,5 +198,4 @@ The repo is private – please add the user `orirot10` with Admin permissions so
 Repo link (active):  
 https://github.com/orirot10/table-type-detector-service
 
-Waiting for your feedback!  
-Good luck with the interview – this looks like one of the most impressive projects they'll see.
+
