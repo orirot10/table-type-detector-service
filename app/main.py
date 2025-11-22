@@ -2,15 +2,26 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.openapi.docs import get_swagger_ui_html
-
 from .schemas import TablePrediction, HealthResponse
 from .model import get_model
 from .config import settings  # Important: ensure settings exists
-
 from PIL import Image, UnidentifiedImageError
 import io
 import uuid
 import time
+import os
+import logging
+
+logger = logging.getLogger("table_type_detector")
+logger.setLevel(logging.INFO)
+
+
+
+app = FastAPI()
+
+TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "index.html")
+
+
 
 # ===== General Settings =====
 
@@ -127,9 +138,10 @@ app.add_middleware(
 def load_model_on_startup():
     try:
         _ = get_model()
-        print("✅ Model loaded successfully at startup")
+        logger.info("Model loaded successfully at startup")
     except Exception as e:
-        print(f"❌ Failed to load model on startup: {e}")
+        logger.exception("Failed to load model on startup")
+
 
 
 @app.get("/docs", include_in_schema=False)
@@ -147,413 +159,11 @@ async def custom_swagger_ui_html():
 
 
 # simple landing page (unchanged)
-@app.get(
-    "/",
-    response_class=HTMLResponse,
-    tags=["Demo"],
-    summary="Interactive Demo Interface",
-    description="Web-based UI for testing the table classification API",
-)
+@app.get("/", response_class=HTMLResponse)
 async def demo_interface():
-    return """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Financial Table Type Detector - Demo</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
-        
-        .container {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            max-width: 800px;
-            width: 100%;
-            overflow: hidden;
-        }
-        
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px;
-            text-align: center;
-        }
-        
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-            font-weight: 700;
-        }
-        
-        .header p {
-            font-size: 1.1em;
-            opacity: 0.9;
-        }
-        
-        .content {
-            padding: 40px;
-        }
-        
-        .upload-area {
-            border: 3px dashed #667eea;
-            border-radius: 15px;
-            padding: 60px 40px;
-            text-align: center;
-            background: #f8f9ff;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-        }
-        
-        .upload-area:hover {
-            border-color: #764ba2;
-            background: #f0f1ff;
-            transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2);
-        }
-        
-        .upload-area.dragover {
-            background: #e8ebff;
-            border-color: #764ba2;
-        }
-        
-        .upload-icon {
-            font-size: 4em;
-            margin-bottom: 20px;
-        }
-        
-        .upload-text {
-            font-size: 1.2em;
-            color: #667eea;
-            margin-bottom: 10px;
-            font-weight: 600;
-        }
-        
-        .upload-subtext {
-            color: #888;
-            font-size: 0.9em;
-        }
-        
-        input[type="file"] {
-            display: none;
-        }
-        
-        .preview-container {
-            margin-top: 30px;
-            display: none;
-        }
-        
-        .preview-image {
-            max-width: 100%;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
-        
-        .analyze-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 15px 40px;
-            font-size: 1.1em;
-            border-radius: 50px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-        }
-        
-        .analyze-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
-        }
-        
-        .analyze-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-        
-        .result-container {
-            margin-top: 30px;
-            padding: 30px;
-            background: #f8f9ff;
-            border-radius: 15px;
-            display: none;
-            border-left: 5px solid #667eea;
-        }
-        
-        .result-label {
-            font-size: 2em;
-            font-weight: 700;
-            color: #667eea;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-        }
-        
-        .result-confidence {
-            font-size: 1.2em;
-            color: #555;
-        }
-        
-        .confidence-bar {
-            height: 20px;
-            background: #e0e0e0;
-            border-radius: 10px;
-            overflow: hidden;
-            margin-top: 15px;
-        }
-        
-        .confidence-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-            transition: width 1s ease;
-        }
-        
-        .loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-            display: none;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-top: 40px;
-        }
-        
-        .feature {
-            text-align: center;
-            padding: 20px;
-        }
-        
-        .feature-icon {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-        
-        .feature-title {
-            font-weight: 600;
-            color: #667eea;
-            margin-bottom: 5px;
-        }
-        
-        .feature-text {
-            color: #888;
-            font-size: 0.9em;
-        }
-        
-        .links {
-            text-align: center;
-            margin-top: 30px;
-            padding-top: 30px;
-            border-top: 1px solid #e0e0e0;
-        }
-        
-        .links a {
-            color: #667eea;
-            text-decoration: none;
-            margin: 0 15px;
-            font-weight: 600;
-            transition: color 0.3s ease;
-        }
-        
-        .links a:hover {
-            color: #764ba2;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>📊 Financial Table Detector</h1>
-            <p>AI-powered classification for financial statements</p>
-        </div>
-        
-        <div class="content">
-            <div class="upload-area" id="uploadArea">
-                <div class="upload-icon">📁</div>
-                <div class="upload-text">Drag & Drop your financial statement</div>
-                <div class="upload-subtext">or click to browse (PNG, JPEG, JPG)</div>
-                <input type="file" id="fileInput" accept="image/png,image/jpeg,image/jpg">
-            </div>
-            
-            <div class="preview-container" id="previewContainer">
-                <img id="previewImage" class="preview-image">
-                <center>
-                    <button class="analyze-btn" id="analyzeBtn">🚀 Analyze Document</button>
-                </center>
-            </div>
-            
-            <div class="loader" id="loader"></div>
-            
-            <div class="result-container" id="resultContainer">
-                <div class="result-label" id="resultLabel"></div>
-                <div class="result-confidence">
-                    Confidence: <strong id="confidenceText"></strong>
-                </div>
-                <div class="confidence-bar">
-                    <div class="confidence-fill" id="confidenceFill"></div>
-                </div>
-            </div>
-            
-            <div class="features">
-                <div class="feature">
-                    <div class="feature-icon">⚡</div>
-                    <div class="feature-title">Fast</div>
-                    <div class="feature-text">Results in under 5 seconds</div>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🎯</div>
-                    <div class="feature-title">Accurate</div>
-                    <div class="feature-text">90%+ accuracy rate</div>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🔒</div>
-                    <div class="feature-title">Secure</div>
-                    <div class="feature-text">No data storage</div>
-                </div>
-            </div>
-            
-            <div class="links">
-                <a href="/docs" target="_blank">📖 API Documentation</a>
-                <a href="/health" target="_blank">💚 Health Check</a>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        const uploadArea = document.getElementById('uploadArea');
-        const fileInput = document.getElementById('fileInput');
-        const previewContainer = document.getElementById('previewContainer');
-        const previewImage = document.getElementById('previewImage');
-        const analyzeBtn = document.getElementById('analyzeBtn');
-        const loader = document.getElementById('loader');
-        const resultContainer = document.getElementById('resultContainer');
-        const resultLabel = document.getElementById('resultLabel');
-        const confidenceText = document.getElementById('confidenceText');
-        const confidenceFill = document.getElementById('confidenceFill');
-        
-        let selectedFile = null;
-        
-        uploadArea.addEventListener('click', () => fileInput.click());
-        
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
-        
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-        
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            const file = e.dataTransfer.files[0];
-            handleFile(file);
-        });
-        
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            handleFile(file);
-        });
-        
-        function handleFile(file) {
-            if (!file || !file.type.match('image/(png|jpeg|jpg)')) {
-                alert('Please upload a PNG or JPEG image');
-                return;
-            }
-            
-            selectedFile = file;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                previewImage.src = e.target.result;
-                previewContainer.style.display = 'block';
-                resultContainer.style.display = 'none';
-            };
-            reader.readAsDataURL(file);
-        }
-        
-        analyzeBtn.addEventListener('click', async () => {
-            if (!selectedFile) return;
-            
-            analyzeBtn.disabled = true;
-            loader.style.display = 'block';
-            resultContainer.style.display = 'none';
-            
-            const formData = new FormData();
-            formData.append('file', selectedFile);
-            
-            try {
-                const response = await fetch('/predict', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    displayResult(data);
-                } else {
-                    alert('Error: ' + data.detail);
-                }
-            } catch (error) {
-                alert('Error analyzing image: ' + error.message);
-            } finally {
-                analyzeBtn.disabled = false;
-                loader.style.display = 'none';
-            }
-        });
-        
-        function displayResult(data) {
-            const label = data.predicted_label;
-            const confidence = (data.confidence * 100).toFixed(1);
-            
-            if (label === 'balance') {
-                resultLabel.textContent = '📊 Balance Sheet';
-            } else if (label === 'activity') {
-                resultLabel.textContent = '💰 Activity Statement';
-            } else {
-                resultLabel.textContent = '❓ Unknown';
-            }
-            
-            confidenceText.textContent = confidence + '%';
-            confidenceFill.style.width = confidence + '%';
-            
-            resultContainer.style.display = 'block';
-        }
-    </script>
-</body>
-</html>
-    """
-
+    with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
+        html = f.read()
+    return HTMLResponse(content=html)
 
 @app.get(
     "/health",
@@ -612,15 +222,20 @@ async def predict_table_type(
         # If someone inside threw HTTPException - pass it along as is
         raise
     except Exception as e:
-        # Unexpected error
-        print(f"[ERROR] request_id={request_id} prediction failed: {e}")
+        logger.exception(f"prediction failed for request_id={request_id}")
         raise_http_error(500, "PREDICTION_FAILED", "Prediction failed due to internal error.")
 
     latency_ms = int((time.time() - t0) * 1000)
-    print(
-        f"[PREDICTION] request_id={request_id} label={label} conf={conf:.4f} "
-        f"latency_ms={latency_ms}"
+    logger.info(
+        f"prediction completed",
+        extra={
+            "request_id": request_id,
+            "label": label,
+            "confidence": float(conf),
+            "latency_ms": latency_ms,
+        },
     )
+
 
     return TablePrediction(
         predicted_label=label,

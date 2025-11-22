@@ -1,18 +1,15 @@
-import os
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "table-type-detector-service"
-    MODEL_PATH: str = os.getenv("MODEL_PATH", "model/table_type_identification.pt")
-    LABELS: str = os.getenv("TABLE_LABELS", "balance,activity")
-    API_KEY: str | None = None  # If you want to require it - set default or env here
+    MODEL_PATH: str = "model/table_type_identification.pt"
+    LABELS: str = "balance,activity"
+    API_KEY: str | None = None
 
     class Config:
         env_file = ".env"
+        extra = "ignore"  # לא לזרוק שגיאה על env שלא מוגדרים כ־fields
 
 
 settings = Settings()
-
-
-
