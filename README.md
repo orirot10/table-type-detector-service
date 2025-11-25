@@ -15,8 +15,7 @@ The model is loaded once at application startup and kept in memory for optimal l
 
 ---
 ## link to service:
-
-https://table-type-detector-541653278614.europe-west1.run.app/
+https://table-type-detector-541653278614.me-west1.run.app/
 ## 🗂️ Project Structure
 
 ```
