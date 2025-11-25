@@ -38,6 +38,8 @@ class TableTypeModel:
         """
         print(f"[TableTypeModel] Loading YOLO model from: {model_path}")
         self.model = YOLO(model_path)
+        self._warmup()
+
 
         # Store the model's internal class-name mapping
         # Example:
@@ -75,7 +77,12 @@ class TableTypeModel:
                 "Could not find 'table_balances' or 'table_activities' in model.names. "
                 "Please verify the trained model classes."
             )
-
+    def _warmup(self):
+        print("[TableTypeModel] Running warmup inference...")
+        dummy = Image.new("RGB", (640, 640), color="white")
+        _ = self.model(dummy)
+        print("[TableTypeModel] Warmup done.")
+        
     def predict(self, image_bytes: bytes) -> Tuple[str, float]:
         """
         Run inference on an image and return a collapsed table-type prediction.
